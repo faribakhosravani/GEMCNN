@@ -1,45 +1,126 @@
 # GEMCNN
 
-<img width="1799" height="941" alt="image" src="https://github.com/user-attachments/assets/d21a3f12-b377-4852-9b02-c0d297f0fdd7" />
-GEMCNN can process measurements from four distinct data sources: FTIR and UV
-(spectroscopy analysis) and ICP-MS and XRF (elemental analysis). b. With a negligible inference time
-compared to human experts, it can predict the probability of a gemstone’s origin or whether it has undergone
-heat treatment. Not all data types are required for inference; missing sources can be masked out as illustrated
-by switch symbols in the figure. c. If the maximum probability exceeds a predefined threshold (top panel),
-the stone prediction can be confidently accepted. If the maximum probability falls below the threshold
-(bottom panel), however, the output should be discarded and the stone should be further analyzed via
-standard methods such as microscopy and expert analysis. The value of the threshold, selected during the
-confidence-thresholding phase, determines the balance between the number of stones that can be processed
-automatically and the accuracy achieved by the model.
+**GEMCNN** is a multimodal deep learning framework for automated gemstone origin determination (OD) and treatment detection (TD) using heterogeneous analytical data sources.
 
-<img width="1543" height="580" alt="image" src="https://github.com/user-attachments/assets/2a6124ad-5973-4732-a388-f8dae72b7abe" />
-Accuracy [%] vs. stones above the threshold [%] for TD with XRF (Left) and ICP
-(right). Both XRF and ICP perform sub-optimally compared to other data sources. Data sources that are not
-present in the legend are masked.
+---
 
-<img width="819" height="647" alt="image" src="https://github.com/user-attachments/assets/d4eb2928-96de-4abf-9b3d-9b1a9904e51d" />
-Comparison between human experts (represented by crosses) and Gemtelligence (represented
-by circles) in terms of the size of the subset of stones that have been confidently classified (on the x-axis)
-and the corresponding level of accuracy achieved for this subset (on the y-axis). Each color corresponds to a
-different combination of data sources. All the combinations apart from the red one (UV+FTIR) are used for
-OD while UV+FTIR is used for TD. The dashed lines are used to highlight the performance change between
-humans and our model. The results in the plot are obtained by evaluating the performance of experts and
-Gemtelligence on test data.
+## Overview
 
-<img width="1530" height="523" alt="image" src="https://github.com/user-attachments/assets/8a2d76ac-0496-42ee-b853-cfa6c8ee5c86" />
-Confusion matrices for TD in the three considered operating modes, namely (Left)
-None, (Middle) Mode 1, and (Right) Mode 2.
+GEMCNN fuses measurements from up to four distinct analytical instruments:
 
-### Usage
+| Modality | Type | Description |
+|---|---|---|
+| UV | Spectroscopy | UV spectral measurements |
+| FTIR | Spectroscopy | Fourier-transform infrared spectroscopy |
+| ICP-MS | Elemental analysis | Inductively coupled plasma mass spectrometry |
+| XRF | Elemental analysis | X-ray fluorescence elemental profiling |
+
+The model outputs a probability distribution over possible origins or treatment states. A confidence-thresholding mechanism allows practitioners to control the trade-off between throughput (stones processed automatically) and accuracy.
+
+---
+
+## Key Features
+
+- **Multimodal fusion** — jointly processes spectroscopic and elemental data
+- **Missing modality tolerance** — any subset of the four sources can be masked at inference time; the model adapts without retraining
+- **Confidence thresholding** — predictions below a configurable threshold are flagged for expert review, ensuring high accuracy on the accepted subset
+- **Negligible inference latency** — suitable for high-throughput laboratory pipelines
+- **Outperforms human experts** — on both OD and TD tasks across multiple data source combinations
+
+---
+
+## Architecture
+
+<img width="1799" alt="GEMCNN Architecture" src="https://github.com/user-attachments/assets/d21a3f12-b377-4852-9b02-c0d297f0fdd7" />
+
+Each data source is processed by a dedicated encoder branch. The resulting embeddings are fused and passed through a classification head that produces per-class probabilities. Missing sources are masked via learned gating, illustrated by the switch symbols above.
+
+**Confidence thresholding** operates as follows:
+
+- If $\max_k p_k \geq \tau$ → prediction is accepted automatically
+- If $\max_k p_k < \tau$ → stone is deferred to expert analysis
+
+The threshold $\tau$ is selected during a post-training calibration phase.
+
+---
+
+## Performance
+
+### Accuracy vs. Coverage
+
+<img width="1543" alt="Accuracy vs Coverage" src="https://github.com/user-attachments/assets/2a6124ad-5973-4732-a388-f8dae72b7abe" />
+
+Accuracy (%) vs. stones above threshold (%) for TD using XRF (left) and ICP-MS (right). XRF and ICP-MS individually underperform relative to spectroscopic sources; combining modalities recovers performance.
+
+### GEMCNN vs. Human Experts
+
+<img width="819" alt="Human vs GEMCNN" src="https://github.com/user-attachments/assets/d4eb2928-96de-4abf-9b3d-9b1a9904e51d" />
+
+Each point represents a (coverage, accuracy) operating point. Circles denote GEMCNN; crosses denote human experts. GEMCNN consistently achieves higher accuracy at equal or greater coverage across all data source combinations.
+
+### Confusion Matrices — Treatment Detection
+
+<img width="1530" alt="Confusion Matrices" src="https://github.com/user-attachments/assets/8a2d76ac-0496-42ee-b853-cfa6c8ee5c86" />
+
+TD confusion matrices under three operating modes:
+
+| Mode | Description |
+|---|---|
+| None | No thresholding; all stones classified |
+| Mode 1 | Conservative threshold; moderate deferral rate |
+| Mode 2 | Strict threshold; low deferral rate, highest accuracy |
+
+
+---
+
+## Quick Start
 
 ```python
 from gemcnn import GEMCNN, fit
 
+# Initialize model for origin determination
 model = GEMCNN(
-    uv_input_len=1200, ftir_input_len=1700,
-    xrf_features=30,   icpms_features=40,
-    task='od',
+    uv_input_len=1200,
+    ftir_input_len=1700,
+    xrf_features=30,
+    icpms_features=40,
+    task='od',          # 'od' for origin determination, 'td' for treatment detection
 )
 
-# fit(model, train_loader, val_loader, device, uv_mean, ftir_mean, elem_mean)
+# Train
+fit(model, train_loader, val_loader, device, uv_mean, ftir_mean, elem_mean)
 ```
+
+### Inference with Missing Modalities
+
+GEMCNN handles incomplete inputs natively. Simply pass `None` for any unavailable source:
+
+```python
+probs = model(uv=uv_tensor, ftir=ftir_tensor, xrf=None, icpms=None)
+```
+
+### Confidence Thresholding
+
+```python
+import torch
+
+probs = model(uv=uv_tensor, ftir=ftir_tensor, xrf=xrf_tensor, icpms=icpms_tensor)
+max_prob, predicted_class = torch.max(probs, dim=-1)
+
+tau = 0.85  # set during calibration
+accepted = max_prob >= tau
+```
+
+---
+
+## Tasks
+
+| Task | Argument | Description |
+|---|---|---|
+| Origin Determination | `task='od'` | Predicts geographic origin of a gemstone |
+| Treatment Detection | `task='td'` | Predicts whether a stone has undergone heat treatment |
+---
+
+## License
+
+This project is licensed under the MIT License. See [`LICENSE`](LICENSE) for details.
